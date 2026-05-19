@@ -2,30 +2,43 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch: # ✅ permet de lancer manuellement
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
+
+      - name: Update npm
+        run: npm install -g npm@10
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 21
+
+      - name: Clean npm cache
+        run: |
+          npm cache clean --force
+          rm -rf node_modules
+          rm -rf package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
+
+      - name: Verify vite
+        run: npx vite --version
 
       - name: Build Vite
         run: npm run build
@@ -36,7 +49,7 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      - name: Make Gradlew executable
+      - name: Make gradlew executable
         run: chmod +x android/gradlew
 
       - name: Build APK
@@ -47,5 +60,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: cup-plinko-debug.apk
+          name: app-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
