@@ -51,6 +51,9 @@ jobs:
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
+      
+      - name: Generate launcher icons & splash
+        run: npx capacitor-assets generate --android --iconBackgroundColor "#3a1e8a" --splashBackgroundColor "#3a1e8a"  
 
       - name: Build APK
         run: |
