@@ -2,71 +2,50 @@ name: Build APK
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [main]
+  workflow_dispatch: # ✅ permet de lancer manuellement
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Setup Node.js + npm cache
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: '22'
 
-      # Setup Java for Android build
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 21
+          java-version: '21'
+          distribution: 'temurin'
 
-      # Install dependencies with npm
       - name: Install dependencies
         run: npm install
-        continue-on-error: true
 
-      # Debug logs
-      - name: Show npm logs
-        run: |
-          ls -la
-          cat package.json
-          cat package-lock.json 2>/dev/null | head -20 || true
-          npm --version
-          node --version
-
-      # Build Vite app
       - name: Build Vite
         run: npm run build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
-      # Sync Capacitor Android
       - name: Sync Capacitor
         run: npx cap sync android
 
-      # Make gradlew executable
       - name: Make Gradlew executable
         run: chmod +x android/gradlew
 
-      # Build Debug APK
       - name: Build APK
         run: |
           cd android
           ./gradlew assembleDebug
 
-      # Upload APK artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
+          name: cup-plinko-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
