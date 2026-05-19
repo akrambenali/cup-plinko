@@ -22,6 +22,11 @@ export default function PlinkoGame({
   const engineRef = useRef<Matter.Engine | null>(null);
   const [dropped, setDropped] = useState(false);
   const [done, setDone] = useState(false);
+  const [debug, setDebug] = useState({ speed: 0, vx: 0, vy: 0, y: 0, ticks: 0, stuck: 0, phase: "—", locked: false });
+  const logsRef = useRef<Array<{ run: number; t: number; phase: string; locked: boolean; x: number; y: number; vx: number; vy: number; speed: number; ticks: number; stuck: number; target: number }>>([]);
+  const runIdRef = useRef(0);
+  const runStartRef = useRef(0);
+  const [logCount, setLogCount] = useState(0);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -32,14 +37,25 @@ export default function PlinkoGame({
     canvas.width = W;
     canvas.height = H;
 
+    // Détection mobile / appareils modestes pour adapter la charge physique & rendu
+    const isMobile =
+      typeof window !== "undefined" &&
+      (window.matchMedia?.("(pointer: coarse)").matches || window.innerWidth < 820);
+    const cores = (typeof navigator !== "undefined" && (navigator as Navigator & { hardwareConcurrency?: number }).hardwareConcurrency) || 4;
+    const lowEnd = isMobile && cores <= 4;
+
     const engine = Matter.Engine.create();
-    engine.gravity.y = 0.5;
-    // Plus d'itérations = collisions plus précises et rebonds plus fluides
-    engine.positionIterations = 10;
-    engine.velocityIterations = 10;
-    engine.constraintIterations = 4;
+    // Gravité réduite pour une chute plus douce et lisible
+    engine.gravity.y = 0.55;
+    // Itérations adaptées : précision desktop, allégées sur mobile pour viser un 60 fps stable
+    engine.positionIterations = lowEnd ? 6 : isMobile ? 8 : 10;
+    engine.velocityIterations = lowEnd ? 6 : isMobile ? 8 : 10;
+    engine.constraintIterations = lowEnd ? 2 : isMobile ? 3 : 4;
     engineRef.current = engine;
 
+    // pixelRatio clampé pour éviter le sur-rendu sur les écrans Retina mobile
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const renderPixelRatio = isMobile ? Math.min(dpr, lowEnd ? 1 : 1.5) : Math.min(dpr, 2);
     const render = Matter.Render.create({
       canvas,
       engine,
@@ -48,7 +64,7 @@ export default function PlinkoGame({
         height: H,
         wireframes: false,
         background: "transparent",
-        pixelRatio: window.devicePixelRatio || 1,
+        pixelRatio: renderPixelRatio,
       },
     });
 
@@ -86,12 +102,12 @@ export default function PlinkoGame({
         x < W / 2 + isisHalfW
       )
         return true;
-      // FAF (centre)
+      // FAF (logo central)
       const cx = W / 2;
       const cy = H / 2;
       const dx = x - cx;
       const dy = y - cy;
-      if (Math.sqrt(dx * dx + dy * dy) < 90 + pad) return true;
+      if (Math.sqrt(dx * dx + dy * dy) < 78 + pad) return true;
       return false;
     };
     for (let r = 0; r < rows; r++) {
@@ -102,14 +118,17 @@ export default function PlinkoGame({
         const px = offset + c * colGap;
         const py = startY + r * rowGap;
         if (isInLogoZone(px, py)) continue;
+        // Évite les clous trop près des bords où le ballon peut se coincer
+        if (px < 30 || px > W - 30) continue;
         Matter.Composite.add(
           engine.world,
           Matter.Bodies.circle(px, py, pegRadius, {
             isStatic: true,
             render: { fillStyle: "#ffffff" },
-            restitution: 0.65,
-            friction: 0.02,
-            slop: 0.01,
+            restitution: 0.35,
+            friction: 0,
+            frictionStatic: 0,
+            slop: 0.05,
           }),
         );
       }
@@ -134,7 +153,15 @@ export default function PlinkoGame({
     }
 
     Matter.Render.run(render);
-    const runner = Matter.Runner.create();
+    // Runner à pas fixe : empêche l'accélération/saccade quand le FPS du device varie.
+    // delta = 1/60s côté desktop, 1/50s sur mobile bas de gamme pour rester fluide
+    // sans changer la vitesse perçue (le pas reste fixe pour la physique).
+    const physicsDelta = lowEnd ? 1000 / 50 : 1000 / 60;
+    const runner = Matter.Runner.create({
+      delta: physicsDelta,
+      // pas fixe : empêche que les chutes de FPS accélèrent la physique
+      isFixed: true,
+    } as Matter.IRunnerOptions & { isFixed: boolean });
     Matter.Runner.run(runner, engine);
 
     return () => {
@@ -152,14 +179,15 @@ export default function PlinkoGame({
     const slotW = W / 5;
     const targetX = slotW * targetSlot + slotW / 2;
 
-    const ballRadius = 20;
+    const ballRadius = 12;
     const ball = Matter.Bodies.circle(W / 2 + (Math.random() - 0.5) * 30, 30, ballRadius, {
-      restitution: 0.55,
-      friction: 0.015,
-      frictionStatic: 0.05,
-      frictionAir: 0.008,
-      density: 0.005,
-      slop: 0.01,
+      restitution: 0.28,
+      friction: 0,
+      frictionStatic: 0,
+      // Plus d'air = vitesse terminale plus basse, chute plus posée
+      frictionAir: 0.022,
+      density: 0.008,
+      slop: 0.05,
       render: {
         sprite: {
           texture: ballImg,
@@ -173,37 +201,105 @@ export default function PlinkoGame({
     // Guidage naturel : très léger en haut, plus marqué près des slots
     const slotTop = H - 110;
     const floorY = H - 30;
+    const captureY = slotTop - 68;
+    const bottomPegY = H - 160;
+    const pegRadius = 7;
+    const clearPegsY = bottomPegY + ballRadius + pegRadius + 10;
+    const laneMargin = ballRadius + 8;
+    const laneLeft = targetSlot * slotW + laneMargin;
+    const laneRight = (targetSlot + 1) * slotW - laneMargin;
+    const laneBias = targetSlot <= 1 ? 22 : -22;
+    const safeApproachX = Math.max(laneLeft, Math.min(laneRight, targetX + laneBias));
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
     let lockedToTarget = false;
+    let lastMoveCheck = { x: ball.position.x, y: ball.position.y, stillTicks: 0 };
+    let stuckCount = 0;
+    let phase = "chute";
+    runIdRef.current += 1;
+    runStartRef.current = performance.now();
+    const runId = runIdRef.current;
     const guide = setInterval(() => {
       if (!engineRef.current) return;
       const dx = targetX - ball.position.x;
       const y = ball.position.y;
+      const speed = Math.hypot(ball.velocity.x, ball.velocity.y);
+      const guideX = y < clearPegsY ? safeApproachX : targetX;
+      const guideDx = guideX - ball.position.x;
 
-      if (y < slotTop - 120) {
-        // Phase 1 : chute libre quasi naturelle, micro-biais
-        const proximity = Math.max(0, (y - 120) / (slotTop - 240));
-        const force = (dx / W) * 0.0006 * proximity * ball.mass;
-        Matter.Body.applyForce(ball, ball.position, { x: force, y: 0 });
-      } else if (y < slotTop) {
-        // Phase 2 : approche, on amène progressivement vers la colonne cible
-        const force = (dx / W) * 0.0035 * ball.mass;
-        Matter.Body.applyForce(ball, ball.position, { x: force, y: 0 });
-      } else {
-        // Phase 3 : entrée dans le palier — verrouille X, garde la vitesse Y
-        if (!lockedToTarget) {
-          lockedToTarget = true;
-          Matter.Body.setPosition(ball, { x: targetX, y });
-          Matter.Body.setVelocity(ball, {
-            x: 0,
-            y: Math.max(2.5, Math.min(6, ball.velocity.y)),
-          });
-        } else {
-          // Maintien doux sur la colonne cible (amortit les rebonds latéraux)
-          const corrected = ball.position.x + (targetX - ball.position.x) * 0.35;
-          Matter.Body.setPosition(ball, { x: corrected, y: ball.position.y });
-          Matter.Body.setVelocity(ball, { x: 0, y: ball.velocity.y });
-        }
+      // Anti-blocage : si le ballon reste posé sur un clou, on le décale vers un couloir sûr.
+      const moved = Math.hypot(ball.position.x - lastMoveCheck.x, ball.position.y - lastMoveCheck.y);
+      lastMoveCheck = {
+        x: ball.position.x,
+        y: ball.position.y,
+        stillTicks: moved < 0.9 && speed < 0.65 && y < clearPegsY ? lastMoveCheck.stillTicks + 1 : 0,
+      };
+      if (lastMoveCheck.stillTicks >= 5) {
+        const escapeDirection = Math.sign(guideDx) || (targetSlot <= 1 ? 1 : -1);
+        Matter.Body.setPosition(ball, {
+          x: clamp(ball.position.x + escapeDirection * 5, ballRadius + 6, W - ballRadius - 6),
+          y: ball.position.y + 1.5,
+        });
+        Matter.Body.setVelocity(ball, {
+          x: clamp(guideDx * 0.08 || escapeDirection * 1.6, -3, 3),
+          y: 4.4,
+        });
+        lastMoveCheck.stillTicks = 0;
+        stuckCount += 1;
       }
+
+      if (y < slotTop - 180) {
+        // Phase 1 : chute presque libre, biais imperceptible
+        const force = (dx / W) * 0.0008 * ball.mass;
+        Matter.Body.applyForce(ball, ball.position, { x: force, y: 0 });
+        phase = "1·chute";
+      } else if (y < captureY) {
+        // Phase 2 : approche — on règle directement la vitesse horizontale
+        // vers un passage décalé pour éviter de rester posé sur les derniers clous.
+        const desiredVx = clamp(guideDx * 0.06, -3.6, 3.6);
+        Matter.Body.setVelocity(ball, { x: desiredVx, y: ball.velocity.y });
+        phase = "2·approche";
+      } else {
+        // Phase 3 : couloir final — le ballon est capturé dans sa colonne cible
+        // avant les séparateurs, donc il ne peut plus sauter vers un autre palier.
+        lockedToTarget = true;
+        const lockX = y < clearPegsY ? safeApproachX : targetX;
+        const lockDx = lockX - ball.position.x;
+        const nextX = clamp(ball.position.x + Math.sign(lockDx) * Math.min(Math.abs(lockDx), 3), laneLeft, laneRight);
+        Matter.Body.setPosition(ball, {
+          x: nextX,
+          y: ball.position.y,
+        });
+        Matter.Body.setVelocity(ball, {
+          x: clamp(lockDx * 0.02, -0.9, 0.9),
+          y: Math.max(2.4, Math.min(4.5, ball.velocity.y || 3)),
+        });
+        phase = "3·lock";
+      }
+      setDebug({
+        speed: Math.round(speed * 100) / 100,
+        vx: Math.round(ball.velocity.x * 100) / 100,
+        vy: Math.round(ball.velocity.y * 100) / 100,
+        y: Math.round(y),
+        ticks: lastMoveCheck.stillTicks,
+        stuck: stuckCount,
+        phase,
+        locked: lockedToTarget,
+      });
+      logsRef.current.push({
+        run: runId,
+        t: Math.round(performance.now() - runStartRef.current),
+        phase,
+        locked: lockedToTarget,
+        x: Math.round(ball.position.x * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        vx: Math.round(ball.velocity.x * 100) / 100,
+        vy: Math.round(ball.velocity.y * 100) / 100,
+        speed: Math.round(speed * 100) / 100,
+        ticks: lastMoveCheck.stillTicks,
+        stuck: stuckCount,
+        target: targetSlot,
+      });
+      setLogCount(logsRef.current.length);
     }, 20);
 
     let finished = false;
