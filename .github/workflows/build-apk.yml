@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK Release
 
 on:
   push:
@@ -51,17 +51,28 @@ jobs:
 
       - name: Make gradlew executable
         run: chmod +x android/gradlew
-      
-      - name: Generate launcher icons & splash
-        run: npx capacitor-assets generate --android --iconBackgroundColor "#3a1e8a" --splashBackgroundColor "#3a1e8a"  
 
-      - name: Build APK
+      - name: Generate launcher icons & splash
+        run: npx capacitor-assets generate --android --iconBackgroundColor "#3a1e8a" --splashBackgroundColor "#3a1e8a"
+
+      # ✅ Decode keystore depuis les secrets
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/cup-plinko.keystore
+
+      # ✅ Build release signé
+      - name: Build Release APK
         run: |
           cd android
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$GITHUB_WORKSPACE/android/app/cup-plinko.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload APK
+      # ✅ Upload APK release
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: app-release.apk
+          path: android/app/build/outputs/apk/release/app-release.apk
