@@ -26,19 +26,19 @@ export type QuotaConfig = {
 
 export const QUOTAS: Record<StoreType, QuotaConfig> = {
   top_mt: {
-    total: 80,
-    p3Threshold: 40,
-    stocks: { produit_300g: 40, bracelet: 20, magnet: 12, sac_tnt: 5, tshirt: 1, sac_a_dos: 2 },
+    total: 50,
+    p3Threshold: 25,
+    stocks: { produit_300g: 10, bracelet: 20, magnet: 12, sac_tnt: 5, tshirt: 1, sac_a_dos: 2 },
   },
   mt: {
-    total: 80,
-    p3Threshold: 40,
-    stocks: { produit_300g: 40, bracelet: 20, magnet: 12, sac_tnt: 5, tshirt: 1, sac_a_dos: 2 },
+    total: 50,
+    p3Threshold: 25,
+    stocks: { produit_300g: 10, bracelet: 20, magnet: 12, sac_tnt: 5, tshirt: 1, sac_a_dos: 2 },
   },
   mm: {
-    total: 60,
-    p3Threshold: 35,
-    stocks: { produit_300g: 28, bracelet: 16, magnet: 9, sac_tnt: 4, tshirt: 1, sac_a_dos: 2 },
+    total: 40,
+    p3Threshold: 23,
+    stocks: { produit_300g: 8, bracelet: 16, magnet: 9, sac_tnt: 4, tshirt: 1, sac_a_dos: 2 },
   },
 };
 
